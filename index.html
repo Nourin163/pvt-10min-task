@@ -1,0 +1,448 @@
+c:\PVT\pvt_10min_web_app\pvt_10min_web_app\index.htmlvalid<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>10-Minute PVT Task</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f7f7f7;
+      margin: 0;
+      padding: 0;
+      color: #222;
+    }
+    .container {
+      max-width: 850px;
+      margin: 40px auto;
+      background: white;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.12);
+    }
+    h1, h2 {
+      text-align: center;
+    }
+    label {
+      display: block;
+      margin-top: 16px;
+      font-weight: bold;
+    }
+    input, select {
+      width: 100%;
+      padding: 10px;
+      margin-top: 6px;
+      font-size: 16px;
+      box-sizing: border-box;
+    }
+    button {
+      font-size: 18px;
+      padding: 12px 22px;
+      margin-top: 18px;
+      cursor: pointer;
+      border: none;
+      border-radius: 8px;
+      background: #1f6feb;
+      color: white;
+    }
+    button.secondary {
+      background: #555;
+    }
+    button:disabled {
+      background: #aaa;
+      cursor: not-allowed;
+    }
+    .center {
+      text-align: center;
+    }
+    #taskScreen {
+      display: none;
+      min-height: 75vh;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      text-align: center;
+      user-select: none;
+    }
+    #stimulus {
+      font-size: 96px;
+      color: red;
+      visibility: hidden;
+      margin: 40px;
+    }
+    #respondButton {
+      width: 260px;
+      height: 80px;
+      font-size: 24px;
+      background: #111;
+    }
+    #statusText {
+      font-size: 20px;
+      margin-top: 20px;
+    }
+    #timer {
+      font-size: 18px;
+      color: #555;
+    }
+    .warning {
+      color: #a40000;
+      font-weight: bold;
+    }
+    .summary {
+      background: #f1f5f9;
+      padding: 16px;
+      border-radius: 8px;
+      margin-top: 20px;
+      text-align: left;
+    }
+    .small {
+      font-size: 14px;
+      color: #555;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container" id="setupScreen">
+    <h1>10-Minute Psychomotor Vigilance Task</h1>
+
+    <p>
+      In this task, a red circle will appear on the screen at random times.
+      Press <b>SPACE</b> or click/tap the response button as quickly as possible
+      whenever the red circle appears.
+    </p>
+
+    <p class="warning">
+      Do not complete this task while driving, walking, working, responding to calls, or multitasking.
+      Please complete it in a quiet and safe location.
+    </p>
+
+    <label for="participantId">Participant ID</label>
+    <input type="text" id="participantId" placeholder="Example: P001" />
+
+    <label for="sessionType">Session type</label>
+    <select id="sessionType">
+      <option value="">Select one</option>
+      <option value="pre_shift">pre_shift</option>
+      <option value="post_shift">post_shift</option>
+    </select>
+
+    <label for="taskDuration">Task duration</label>
+    <select id="taskDuration">
+      <option value="600">10 minutes - field study</option>
+    </select>
+
+    <div class="center">
+      <button onclick="startTask()">Start PVT</button>
+    </div>
+
+    <p class="small">
+      Data are saved only on this device as a CSV download at the end of the task.
+      Please upload or send the CSV file to the research team as instructed.
+        <br><br>
+  Developed by: Nourin Mohsin (MANAS Lab, University of Michigan)
+<br><br>
+  URL: https://nourin163.github.io/pvt-10min-task/
+    </p>
+  </div>
+
+  <div id="taskScreen">
+    <div id="timer">Time remaining: --</div>
+    <div id="stimulus">●</div>
+    <button id="respondButton" onclick="handleResponse()">RESPOND</button>
+    <div id="statusText">Wait for the red circle.</div>
+    <p class="small">You may press SPACE or click/tap the response button.</p>
+  </div>
+
+  <div class="container" id="endScreen" style="display:none;">
+    <h2>PVT Complete</h2>
+    <p>Your result CSV should download automatically. If it does not, click the button below.</p>
+    <div id="summaryBox" class="summary"></div>
+    <div class="center">
+      <button onclick="downloadCSV()">Download CSV Again</button>
+    </div>
+  </div>
+
+<script>
+let participantId = "";
+let sessionType = "";
+let taskDurationSec = 600;
+
+let taskStartTime = null;
+let nextStimulusTime = null;
+let stimulusOnsetTime = null;
+let stimulusVisible = false;
+let trialNumber = 0;
+let records = [];
+let taskTimer = null;
+let stimulusTimeout = null;
+let endTimeout = null;
+
+const minWait = 2000;   // 2 seconds
+const maxWait = 10000;  // 10 seconds
+const stimulusTimeoutMs = 2000; // response window after stimulus appears
+
+function nowMs() {
+  return performance.now();
+}
+
+function wallClockISO() {
+  return new Date().toISOString();
+}
+
+function startTask() {
+  participantId = document.getElementById("participantId").value.trim();
+  sessionType = document.getElementById("sessionType").value;
+  taskDurationSec = Number(document.getElementById("taskDuration").value);
+
+  if (!participantId || !sessionType) {
+    alert("Please enter Participant ID and select session type.");
+    return;
+  }
+
+  document.getElementById("setupScreen").style.display = "none";
+  document.getElementById("taskScreen").style.display = "flex";
+
+  taskStartTime = nowMs();
+  records = [];
+  trialNumber = 0;
+
+  document.addEventListener("keydown", spaceKeyHandler);
+
+  scheduleNextStimulus();
+  taskTimer = setInterval(updateTimer, 100);
+  endTimeout = setTimeout(endTask, taskDurationSec * 1000);
+}
+
+function updateTimer() {
+  const elapsed = (nowMs() - taskStartTime) / 1000;
+  const remaining = Math.max(0, taskDurationSec - elapsed);
+  document.getElementById("timer").textContent = `Time remaining: ${remaining.toFixed(1)} seconds`;
+}
+
+function randomWaitMs() {
+  return minWait + Math.random() * (maxWait - minWait);
+}
+
+function scheduleNextStimulus() {
+  if ((nowMs() - taskStartTime) >= taskDurationSec * 1000) {
+    endTask();
+    return;
+  }
+
+  stimulusVisible = false;
+  stimulusOnsetTime = null;
+  document.getElementById("stimulus").style.visibility = "hidden";
+  document.getElementById("statusText").textContent = "Wait for the red circle.";
+
+  const wait = randomWaitMs();
+  nextStimulusTime = nowMs() + wait;
+
+  setTimeout(showStimulus, wait);
+}
+
+function showStimulus() {
+  if ((nowMs() - taskStartTime) >= taskDurationSec * 1000) {
+    endTask();
+    return;
+  }
+
+  stimulusVisible = true;
+  stimulusOnsetTime = nowMs();
+  trialNumber += 1;
+
+  document.getElementById("stimulus").style.visibility = "visible";
+  document.getElementById("statusText").textContent = "Respond now!";
+
+  stimulusTimeout = setTimeout(() => {
+    if (stimulusVisible) {
+      records.push({
+        participant_id: participantId,
+        session_type: sessionType,
+        timestamp: wallClockISO(),
+        trial_number: trialNumber,
+        event_type: "missed_response",
+        reaction_time_ms: "",
+        lapse: 0,
+        false_start: 0,
+        valid_response: 0,
+        missed_response: 1,
+        task_elapsed_time_sec: ((nowMs() - taskStartTime) / 1000).toFixed(3),
+        device_user_agent: navigator.userAgent.replaceAll(",", " ")
+      });
+      stimulusVisible = false;
+      stimulusOnsetTime = null;
+      document.getElementById("stimulus").style.visibility = "hidden";
+      document.getElementById("statusText").textContent = "Missed response. Wait for the next red circle.";
+      scheduleNextStimulus();
+    }
+  }, stimulusTimeoutMs);
+}
+
+function handleResponse() {
+  const responseTime = nowMs();
+
+  if (!stimulusVisible) {
+    trialNumber += 1;
+    records.push({
+      participant_id: participantId,
+      session_type: sessionType,
+      timestamp: wallClockISO(),
+      trial_number: trialNumber,
+      event_type: "false_start_before_stimulus",
+      reaction_time_ms: "",
+      lapse: 0,
+      false_start: 1,
+      valid_response: 0,
+      missed_response: 0,
+      task_elapsed_time_sec: ((responseTime - taskStartTime) / 1000).toFixed(3),
+      device_user_agent: navigator.userAgent.replaceAll(",", " ")
+    });
+    document.getElementById("statusText").textContent = "Too early. Wait for the red circle.";
+    return;
+  }
+
+  clearTimeout(stimulusTimeout);
+
+  const rt = responseTime - stimulusOnsetTime;
+  const falseStart = rt < 100 ? 1 : 0;
+  const lapse = rt > 500 ? 1 : 0;
+  const validResponse = (rt >= 100 && rt <= 500) ? 1 : 0;
+
+  records.push({
+    participant_id: participantId,
+    session_type: sessionType,
+    timestamp: wallClockISO(),
+    trial_number: trialNumber,
+    event_type: "response_to_stimulus",
+    reaction_time_ms: rt.toFixed(3),
+    lapse: lapse,
+    false_start: falseStart,
+    valid_response: validResponse,
+    missed_response: 0,
+    task_elapsed_time_sec: ((responseTime - taskStartTime) / 1000).toFixed(3),
+    device_user_agent: navigator.userAgent.replaceAll(",", " ")
+  });
+
+  stimulusVisible = false;
+  stimulusOnsetTime = null;
+  document.getElementById("stimulus").style.visibility = "hidden";
+
+  if (falseStart) {
+    document.getElementById("statusText").textContent = "Too fast. Wait for the next red circle.";
+  } else if (lapse) {
+    document.getElementById("statusText").textContent = "Response recorded. Wait for the next red circle.";
+  } else {
+    document.getElementById("statusText").textContent = "Good. Wait for the next red circle.";
+  }
+
+  scheduleNextStimulus();
+}
+
+function spaceKeyHandler(event) {
+  if (event.code === "Space") {
+    event.preventDefault();
+    handleResponse();
+  }
+}
+
+function endTask() {
+  clearInterval(taskTimer);
+  clearTimeout(stimulusTimeout);
+  clearTimeout(endTimeout);
+  document.removeEventListener("keydown", spaceKeyHandler);
+
+  document.getElementById("taskScreen").style.display = "none";
+  document.getElementById("endScreen").style.display = "block";
+
+const validRTs = records
+  .filter(r => r.valid_response === 1 && r.reaction_time_ms !== "")
+  .map(r => Number(r.reaction_time_ms));
+
+const allRTs = records
+  .filter(r => r.reaction_time_ms !== "")
+  .map(r => Number(r.reaction_time_ms));
+
+  const totalLapses = records.reduce((sum, r) => sum + Number(r.lapse), 0);
+  const totalFalseStarts = records.reduce((sum, r) => sum + Number(r.false_start), 0);
+  const totalMissed = records.reduce((sum, r) => sum + Number(r.missed_response), 0);
+  const totalValid = records.reduce((sum, r) => sum + Number(r.valid_response), 0);
+  const meanRT = validRTs.length ? (validRTs.reduce((a,b)=>a+b,0) / validRTs.length).toFixed(2) : "NA";
+  const medianRT = validRTs.length ? median(validRTs).toFixed(2) : "NA";
+  const totalMeanRT = allRTs.length ? (allRTs.reduce((a,b)=>a+b,0) / allRTs.length).toFixed(2) : "NA";
+  const totalMedianRT = allRTs.length ? median(allRTs).toFixed(2) : "NA";
+
+document.getElementById("summaryBox").innerHTML = `
+  <b>Participant:</b> ${participantId}<br>
+  <b>Session:</b> ${sessionType}<br>
+  <b>Total trials:</b> ${records.length}<br>
+  <b>Total valid responses:</b> ${totalValid}<br>
+  <b>Total lapses:</b> ${totalLapses}<br>
+  <b>Total false starts:</b> ${totalFalseStarts}<br>
+  <b>Total missed responses:</b> ${totalMissed}<br>
+  <b>Total mean RT from all responses:</b> ${totalMeanRT} ms<br>
+  <b>Total median RT from all responses:</b> ${totalMedianRT} ms<br>
+  <b>Mean RT from valid responses:</b> ${meanRT} ms<br>
+  <b>Median RT from valid responses:</b> ${medianRT} ms<br>
+`;
+
+  downloadCSV();
+}
+
+function median(values) {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+function csvEscape(value) {
+  if (value === null || value === undefined) return "";
+  const str = String(value);
+  if (str.includes(",") || str.includes('"') || str.includes("\n")) {
+    return `"${str.replaceAll('"', '""')}"`;
+  }
+  return str;
+}
+
+function downloadCSV() {
+  const headers = [
+    "participant_id",
+    "session_type",
+    "timestamp",
+    "trial_number",
+    "event_type",
+    "reaction_time_ms",
+    "lapse",
+    "false_start",
+    "valid_response",
+    "missed_response",
+    "task_elapsed_time_sec",
+    "device_user_agent"
+  ];
+
+  const csvRows = [headers.join(",")];
+
+  records.forEach(row => {
+    csvRows.push(headers.map(h => csvEscape(row[h])).join(","));
+  });
+
+  const csvContent = csvRows.join("\n");
+  const blob = new Blob([csvContent], {type: "text/csv;charset=utf-8;"});
+  const url = URL.createObjectURL(blob);
+
+  const safeId = participantId.replace(/[^a-zA-Z0-9_-]/g, "");
+  const safeSession = sessionType.replace(/[^a-zA-Z0-9_-]/g, "");
+  const timeStamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const filename = `PVT_${safeId}_${safeSession}_${timeStamp}.csv`;
+
+  const link = document.createElement("a");
+  link.setAttribute("href", url);
+  link.setAttribute("download", filename);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
