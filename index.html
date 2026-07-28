@@ -193,7 +193,9 @@ const CSV_HEADERS = [
   "valid_response",
   "missed_response",
   "task_elapsed_time_sec",
-  "device_user_agent"
+  "device_user_agent",
+  "summary_metric",
+  "summary_value"
 ];
 
 const STORAGE_KEY = "pvt_sessions_v1";
@@ -475,12 +477,39 @@ function csvEscape(value) {
   return str;
 }
 
-function sessionToCSV(session) {
-  const rows = [CSV_HEADERS.join(",")];
+function sessionRows(session) {
+  const rows = [];
   session.records.forEach(row => {
     rows.push(CSV_HEADERS.map(h => csvEscape(row[h])).join(","));
   });
-  return rows.join("\n");
+  const summaryMetrics = [
+    ["completed", session.completed ? 1 : 0],
+    ["total_trials", session.summary.total_trials],
+    ["total_valid_responses", session.summary.total_valid],
+    ["total_lapses", session.summary.total_lapses],
+    ["total_false_starts", session.summary.total_false_starts],
+    ["total_missed_responses", session.summary.total_missed],
+    ["mean_rt_all_responses_ms", session.summary.mean_rt_all],
+    ["median_rt_all_responses_ms", session.summary.median_rt_all],
+    ["mean_rt_valid_responses_ms", session.summary.mean_rt_valid],
+    ["median_rt_valid_responses_ms", session.summary.median_rt_valid]
+  ];
+  summaryMetrics.forEach(([metric, value]) => {
+    const row = {
+      participant_id: session.participant_id,
+      session_type: session.session_type,
+      timestamp: session.start_iso,
+      event_type: "session_summary",
+      summary_metric: metric,
+      summary_value: value
+    };
+    rows.push(CSV_HEADERS.map(h => csvEscape(row[h])).join(","));
+  });
+  return rows;
+}
+
+function sessionToCSV(session) {
+  return [CSV_HEADERS.join(",")].concat(sessionRows(session)).join("\n");
 }
 
 function sessionFilename(session) {
@@ -526,11 +555,9 @@ function exportSession(sessionId) {
 function exportAllSessions() {
   const sessions = loadSessions();
   if (!sessions.length) { alert("No saved sessions."); return; }
-  const rows = [CSV_HEADERS.join(",")];
+  let rows = [CSV_HEADERS.join(",")];
   sessions.forEach(session => {
-    session.records.forEach(row => {
-      rows.push(CSV_HEADERS.map(h => csvEscape(row[h])).join(","));
-    });
+    rows = rows.concat(sessionRows(session));
   });
   const timeStamp = new Date().toISOString().replace(/[:.]/g, "-");
   deliverCSV(rows.join("\n"), "PVT_all_sessions_" + timeStamp + ".csv");
